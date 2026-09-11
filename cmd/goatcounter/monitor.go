@@ -37,21 +37,23 @@ Flags:
 
 func cmdMonitor(f zli.Flags, ready chan<- struct{}, stop chan struct{}) error {
 	var (
-		dbConnect = f.String(defaultDB(), "db").Pointer()
-		dbConn    = f.String("16,4", "dbconn").Pointer()
-		debug     = f.StringList(nil, "debug")
-		period    = f.Int(120, "period").Pointer()
-		once      = f.Bool(false, "once").Pointer()
-		site      = f.Int(0, "site").Pointer()
+		dbConnectFlag = f.String(defaultDB(), "db")
+		dbConnect     = dbConnectFlag.Pointer()
+		dbConnFlag    = f.String("16,4", "dbconn")
+		dbConn        = dbConnFlag.Pointer()
+		debug         = f.StringList(nil, "debug")
+		period        = f.Int(120, "period").Pointer()
+		once          = f.Bool(false, "once").Pointer()
+		site          = f.Int(0, "site").Pointer()
 	)
 	if err := f.Parse(zli.FromEnv("GOATCOUNTER")); err != nil && !errors.As(err, &zli.ErrUnknownEnv{}) {
 		return err
 	}
 
-	return func(dbConnect, dbConn string, debug []string, period, site int, once bool) error {
+	return func(dbConnect, dbConn string, dbConnSet bool, debug []string, period, site int, once bool) error {
 		log.SetDebug(debug)
 
-		db, ctx, err := connectDB(dbConnect, dbConn, []string{"pending"}, false, false)
+		db, ctx, err := connectDB(dbConnect, dbConn, dbConnSet, []string{"pending"}, false, false)
 		if err != nil {
 			return err
 		}
@@ -98,5 +100,5 @@ func cmdMonitor(f zli.Flags, ready chan<- struct{}, stop chan struct{}) error {
 				return nil
 			}
 		}
-	}(*dbConnect, *dbConn, debug.StringsSplit(","), *period, *site, *once)
+	}(*dbConnect, *dbConn, dbConnFlag.Set(), debug.StringsSplit(","), *period, *site, *once)
 }

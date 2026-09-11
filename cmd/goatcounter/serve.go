@@ -247,7 +247,7 @@ func cmdServe(f zli.Flags, ready chan<- struct{}, stop chan struct{}, saas bool)
 		return v
 	}
 
-	db, ctx, err := connectDB(dbConnect.String(), dbConn.String(),
+	db, ctx, err := connectDB(dbConnect.String(), dbConn.String(), dbConn.Set(),
 		map[bool][]string{true: {"all"}, false: {"pending"}}[automigrate.Bool()],
 		true, dev.Bool())
 	if err != nil {
@@ -342,7 +342,7 @@ func cmdServe(f zli.Flags, ready chan<- struct{}, stop chan struct{}, saas bool)
 	if !saas && len(cnames) == 0 {
 		dbFlag := ""
 		if dbConnect.String() != defaultDB() {
-			dbFlag = `-db="` + strings.ReplaceAll(dbConnect.String(), `"`, `\"`) + `" `
+			dbFlag = `-db="` + strings.ReplaceAll(redactConnect(dbConnect.String()), `"`, `\"`) + `" `
 		}
 		// Adjust command for Docker or Podman
 		cmd := "goatcounter"

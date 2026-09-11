@@ -16,6 +16,7 @@ import (
 	"zgo.at/goatcounter/v2"
 	"zgo.at/goatcounter/v2/db/migrate/gomig"
 	"zgo.at/goatcounter/v2/pkg/log"
+	"zgo.at/goatcounter/v2/pkg/pizzasql"
 	"zgo.at/jfmt"
 	"zgo.at/json"
 	"zgo.at/slog_align"
@@ -195,28 +196,71 @@ func cmdMain(f zli.Flags, ready chan<- struct{}, stop chan struct{}) {
 	zli.Exit(0)
 }
 
-func connectDB(connect, dbConn string, migrate []string, create, dev bool) (zdb.DB, context.Context, error) {
+// registerPizzaSQL installs the PizzaSQL zdb driver when connect targets the
+// managed service. Registering on demand keeps ordinary local SQLite
+// connections on go-sqlite3.
+func registerPizzaSQL(connect string) {
+	if pizzasql.IsConnectString(connect) {
+		pizzasql.Register()
+	}
+}
+
+// effectivePool resolves the max-open and max-idle pool sizes for a
+// connection. An explicitly supplied -dbconn always wins. Otherwise PizzaSQL
+// uses its bounded 2,2 default and every other engine falls back to zdb's own
+// 16,4 default (returned as 0,0).
+func effectivePool(connect, dbConn string, dbConnSet bool) (open, idle int, err error) {
+	if dbConnSet {
+		openS, idleS, ok := strings.Cut(dbConn, ",")
+		if !ok {
+			return 0, 0, errors.New("-dbconn flag: must be as max_open,max_idle")
+		}
+		open, err = strconv.Atoi(openS)
+		if err != nil {
+			return 0, 0, fmt.Errorf("-dbconn flag: %w", err)
+		}
+		idle, err = strconv.Atoi(idleS)
+		if err != nil {
+			return 0, 0, fmt.Errorf("-dbconn flag: %w", err)
+		}
+		return open, idle, nil
+	}
+
+	// The pgproxy enforces a per-organization connection quota, so PizzaSQL
+	// keeps a small pool even though serve and monitor default -dbconn to the
+	// generic 16,4.
+	if pizzasql.IsConnectString(connect) {
+		return pizzasql.MaxOpenConns, pizzasql.MaxIdleConns, nil
+	}
+	return 0, 0, nil
+}
+
+// redactConnect returns a connect string that is safe to put in a user-facing
+// message. PizzaSQL connect strings carry the managed API key as their
+// password, so they are never echoed in full.
+func redactConnect(connect string) string {
+	return pizzasql.RedactConnect(connect)
+}
+
+// redactDBError removes a PizzaSQL connect string from an error before it can
+// reach a user. zdb's NotExistError embeds the raw connection string, which for
+// PizzaSQL includes the managed API key. The error keeps its type so callers
+// that branch on NotExistError still work.
+func redactDBError(connect string, err error) error {
+	return pizzasql.RedactError(connect, err)
+}
+
+func connectDB(connect, dbConn string, dbConnSet bool, migrate []string, create, dev bool) (zdb.DB, context.Context, error) {
 	if strings.Contains(connect, "://") && !strings.Contains(connect, "+") {
 		connect = strings.Replace(connect, "://", "+", 1)
 		log.Warnf(context.Background(), `the connection string for -db changed from "engine://connectString"`+
 			` to "engine+connectString"; the ://-variant will work for now, but will be removed in a future release`)
 	}
+	registerPizzaSQL(connect)
 
-	var open, idle int
-	if dbConn != "" {
-		openS, idleS, ok := strings.Cut(dbConn, ",")
-		if !ok {
-			return nil, nil, errors.New("-dbconn flag: must be as max_open,max_idle")
-		}
-		var err error
-		open, err = strconv.Atoi(openS)
-		if err != nil {
-			return nil, nil, fmt.Errorf("-dbconn flag: %w", err)
-		}
-		idle, err = strconv.Atoi(idleS)
-		if err != nil {
-			return nil, nil, fmt.Errorf("-dbconn flag: %w", err)
-		}
+	open, idle, err := effectivePool(connect, dbConn, dbConnSet)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	fsys, err := zfs.EmbedOrDir(goatcounter.DB, "db", dev)
@@ -245,10 +289,13 @@ func connectDB(connect, dbConn string, migrate []string, create, dev bool) (zdb.
 	// TODO: maybe ask for confirmation here?
 	var cErr *drivers.NotExistError
 	if errors.As(err, &cErr) {
-		if cErr.DB == "" {
+		if pizzasql.IsConnectString(connect) {
+			err = errors.New("pizzasql database does not exist or is empty.\n" +
+				"Add the -createdb flag to create this database if you're sure this is the right location")
+		} else if cErr.DB == "" {
 			err = fmt.Errorf("%s database at %q exists but is empty.\n"+
 				"Add the -createdb flag to create this database if you're sure this is the right location",
-				cErr.Driver, connect)
+				cErr.Driver, redactConnect(connect))
 		} else {
 			err = fmt.Errorf("%s database at %q doesn't exist.\n"+
 				"Add the -createdb flag to create this database if you're sure this is the right location",
@@ -256,7 +303,7 @@ func connectDB(connect, dbConn string, migrate []string, create, dev bool) (zdb.
 		}
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, redactDBError(connect, err)
 	}
 
 	// Insert/update languages. For PostgreSQL this adds ~120ms startup time,

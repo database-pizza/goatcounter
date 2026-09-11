@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+. /home/pizzadatabase/goatcounter/shared/goatcounter.env
+export GOATCOUNTER_DB
+
+export HOME=/home/pizzadatabase/goatcounter/shared
+export GOATCOUNTER_TMPDIR=/home/pizzadatabase/goatcounter/shared/tmp
+
+exec /home/pizzadatabase/goatcounter/current/goatcounter serve \
+	-listen=127.0.0.1:3002 \
+	-tls=http \
+	-domain=goatcounter.database.pizza \
+	-automigrate \
+	-dbconn=2,2

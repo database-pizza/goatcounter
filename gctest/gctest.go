@@ -15,6 +15,7 @@ import (
 	"zgo.at/goatcounter/v2/cron"
 	"zgo.at/goatcounter/v2/db/migrate/gomig"
 	"zgo.at/goatcounter/v2/pkg/geo"
+	"zgo.at/goatcounter/v2/pkg/pizzasql"
 	"zgo.at/z18n"
 	"zgo.at/zdb"
 	"zgo.at/zdb-drivers/go-sqlite3"
@@ -96,15 +97,28 @@ func db(t testing.TB, storeFile bool) context.Context {
 	}
 	os.Setenv("GCTEST_CONNECT", conn)
 
-	db, err := zdb.Connect(context.Background(), zdb.ConnectOptions{
+	opt := zdb.ConnectOptions{
 		Connect:      conn,
 		Files:        os.DirFS(zgo.ModuleRoot()),
 		Migrate:      []string{"all"},
 		GoMigrations: gomig.Migrations,
 		Create:       true,
-	})
+	}
+
+	// Point the whole suite at a managed PizzaSQL tenant when explicitly asked.
+	// PIZZASQL_TEST_DSN is never set by default, so ordinary test runs keep
+	// using the in-memory SQLite database.
+	if dsn := os.Getenv("PIZZASQL_TEST_DSN"); dsn != "" {
+		pizzasql.Register()
+		opt.Connect = "sqlite/pizzasql+" + dsn
+		opt.MaxOpenConns = pizzasql.MaxOpenConns
+		opt.MaxIdleConns = pizzasql.MaxIdleConns
+		os.Setenv("GCTEST_CONNECT", opt.Connect)
+	}
+
+	db, err := zdb.Connect(context.Background(), opt)
 	if err != nil {
-		t.Fatalf("connect to DB: %s", err)
+		t.Fatalf("connect to DB: %s", pizzasql.RedactError(opt.Connect, err))
 	}
 
 	ctx := Context(db)

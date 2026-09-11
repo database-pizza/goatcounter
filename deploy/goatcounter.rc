@@ -1,0 +1,34 @@
+#!/bin/sh
+
+# PROVIDE: goatcounter
+# REQUIRE: NETWORKING
+# KEYWORD: shutdown
+
+# GoatCounter service for goatcounter.database.pizza.
+
+. /etc/rc.subr
+
+name="goatcounter"
+rcvar="goatcounter_enable"
+
+command="/usr/sbin/daemon"
+procname="/usr/sbin/daemon"
+pidfile="/var/run/goatcounter.pid"
+
+load_rc_config "$name"
+
+: ${goatcounter_enable:="NO"}
+# daemon(8) opens the pidfile and log as root, then drops only the child.
+: ${goatcounter_daemon_user:="goatcounter"}
+: ${goatcounter_bin:="/home/pizzadatabase/goatcounter/current/goatcounter"}
+# Not named "_env": rc.subr treats <name>_env as an environment file and would
+# prepend "env <file>" to the command. The launcher script sources it instead.
+: ${goatcounter_dbenv:="/home/pizzadatabase/goatcounter/shared/goatcounter.env"}
+: ${goatcounter_run:="/home/pizzadatabase/goatcounter/shared/goatcounter-run"}
+: ${goatcounter_log:="/var/log/goatcounter.log"}
+
+required_files="${goatcounter_bin} ${goatcounter_dbenv} ${goatcounter_run}"
+
+command_args="-f -r -R 5 -P ${pidfile} -o ${goatcounter_log} -u ${goatcounter_daemon_user} ${goatcounter_run}"
+
+run_rc_command "$1"

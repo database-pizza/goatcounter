@@ -10,6 +10,7 @@ import (
 	"zgo.at/errors"
 	"zgo.at/goatcounter/v2"
 	"zgo.at/goatcounter/v2/pkg/log"
+	"zgo.at/goatcounter/v2/pkg/pizzasql"
 	"zgo.at/guru"
 	"zgo.at/z18n"
 	"zgo.at/zdb"
@@ -420,7 +421,7 @@ start:
 	case "newdb":
 		err := cmdDBTest(f, dbConnect, debug.StringsSplit(","), false)
 		if err == nil {
-			return guru.Errorf(2, "database at %q already exists", *dbConnect)
+			return guru.Errorf(2, "database at %q already exists", redactConnect(*dbConnect))
 		}
 
 		var cErr *drivers.NotExistError
@@ -428,7 +429,7 @@ start:
 			return err
 		}
 
-		db, _, err := connectDB(*dbConnect, "", []string{"pending"}, true, false)
+		db, _, err := connectDB(*dbConnect, "", false, []string{"pending"}, true, false)
 		if err != nil {
 			return err
 		}
@@ -505,10 +506,20 @@ func cmdDBTest(f zli.Flags, dbConnect *string, debug []string, print bool) error
 	if *dbConnect == "" {
 		return errors.New("must add -db flag")
 	}
+	connect := *dbConnect
+	if strings.Contains(connect, "://") && !strings.Contains(connect, "+") {
+		connect = strings.Replace(connect, "://", "+", 1)
+	}
+	registerPizzaSQL(connect)
 	log.SetDebug(debug)
-	db, err := zdb.Connect(context.Background(), zdb.ConnectOptions{Connect: *dbConnect})
+	opt := zdb.ConnectOptions{Connect: connect}
+	if pizzasql.IsConnectString(connect) {
+		opt.MaxOpenConns = pizzasql.MaxOpenConns
+		opt.MaxIdleConns = pizzasql.MaxIdleConns
+	}
+	db, err := zdb.Connect(context.Background(), opt)
 	if err != nil {
-		return err
+		return redactDBError(connect, err)
 	}
 	defer db.Close()
 
@@ -526,7 +537,7 @@ func cmdDBTest(f zli.Flags, dbConnect *string, debug []string, print bool) error
 	}
 	if print {
 		fmt.Fprintf(zli.Stdout, "DB at %q seems okay; %s version %s\n",
-			*dbConnect, info.DriverName, info.Version)
+			redactConnect(*dbConnect), info.DriverName, info.Version)
 	}
 	return nil
 }
@@ -549,7 +560,7 @@ func cmdDBQuery(f zli.Flags, dbConnect *string, debug []string, createdb *bool) 
 
 	log.SetDebug(debug)
 
-	db, ctx, err := connectDB(*dbConnect, "", nil, *createdb, false)
+	db, ctx, err := connectDB(*dbConnect, "", false, nil, *createdb, false)
 	if err != nil {
 		return err
 	}
@@ -598,7 +609,7 @@ func dbParseFlag(f zli.Flags, dbConnect *string, debug []string, createdb *bool)
 	}
 	log.SetDebug(debug)
 
-	db, _, err := connectDB(*dbConnect, "", []string{"pending"}, *createdb, false)
+	db, _, err := connectDB(*dbConnect, "", false, []string{"pending"}, *createdb, false)
 	if err != nil {
 		return nil, nil, err
 	}
