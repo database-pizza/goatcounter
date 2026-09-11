@@ -208,3 +208,70 @@ caddy validate --config /usr/local/etc/caddy/Caddyfile
 Provisioning, secret rotation, database snapshots, service restarts, and Caddy
 reloads remain explicit operator actions. Never put the managed API key in a
 command-line argument or a release artifact.
+
+## Analytics and privacy
+
+Production tracking uses one GoatCounter site at `goatcounter.database.pizza`.
+Browsers load `count.js` from that origin and POST to
+`https://goatcounter.database.pizza/count`. Each service prefixes the reported
+path so the combined dashboard stays attributable:
+
+| Source | Pageview prefix |
+| --- | --- |
+| Marketing site and blog | `/database.pizza` |
+| Managed console | `/app.database.pizza` |
+| Gogs | `/git.database.pizza` |
+| Vikunja | `/tasks.database.pizza` |
+
+The prefix is applied in the browser by a `window.goatcounter.path` callback in
+each service's HTML shell; nothing domain-specific is stored server-side, which
+is why every count goes to the single site.
+
+Custom adoption events for the console use the
+`app.database.pizza/event/<name>` namespace (GoatCounter trims the leading slash
+from event paths, keeping them distinct from pageviews):
+
+- `signup` — a console account finished passkey registration.
+- `first_database` — the first database created from this browser.
+- `first_query` — the first successful query run from this browser.
+
+Events are emitted at most once per browser using a `localStorage` marker; the
+marker never leaves the browser and identifies no one.
+
+Privacy posture:
+
+- GoatCounter does not set tracking cookies. It stores aggregate pageviews,
+  paths, titles, referrers, screen sizes, and coarse location; it never stores
+  raw IP addresses, names, emails, API keys, database URLs, query text,
+  organization or database names, form values, or any user identifier.
+- The complete allowlist of fields and event names is the table and list above.
+  Never send secrets or tenant data through the counting endpoint.
+- The GoatCounter dashboard itself is not tracked; only the four services are.
+- Retention: the site currently keeps aggregate data indefinitely
+  (`data_retention = 0`). Set a positive number of days in the site's settings
+  if a shorter window is required.
+- Consent: no cookie banner is used because no cookies or personal identifiers
+  are stored. This section is the record to review against applicable privacy
+  requirements.
+
+### Reports
+
+GoatCounter has no built-in multi-report or funnel view, so reports are the
+dashboard filter URLs below. Append the filter to the dashboard as
+`?filter=...`; `at:start` anchors the match to the start of the path and
+`is:pageview` excludes events.
+
+| Report | Filter |
+| --- | --- |
+| Marketing traffic | `in:path at:start /database.pizza` |
+| Console pageviews | `in:path at:start /app.database.pizza is:pageview` |
+| Signups | `in:path at:start app.database.pizza/event/signup` |
+| First database | `in:path at:start app.database.pizza/event/first_database` |
+| First query | `in:path at:start app.database.pizza/event/first_query` |
+
+The adoption funnel is the ordered sequence console pageview → signup →
+`first_database` → `first_query`. Read each step's total from its report (or
+from the HTTP API) and compute the conversion outside GoatCounter.
+
+Every report contains aggregate, non-identifying data only (path, title, count,
+referrer, and coarse dimensions); there is no per-user view.
