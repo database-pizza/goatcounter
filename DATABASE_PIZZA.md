@@ -1,5 +1,12 @@
 # Running GoatCounter on PizzaSQL
 
+> **Retired and unsupported on current PizzaSQL builds.** Current engine
+> releases reject `CHECK` constraints and non-constant defaults such as
+> `DEFAULT current_timestamp` with SQLSTATE `0A000`. GoatCounter's SQLite schema
+> uses both, so a fresh tenant cannot be created or migrated on this engine.
+> Existing tenants remain legacy data; this document records the historical
+> backend design and is not a supported deployment path.
+
 This document describes the database.pizza fork additions that let GoatCounter
 run on a managed [PizzaSQL](../pizzasql) tenant through the
 [app.database.pizza](../app.database.pizza) PostgreSQL proxy (`pgproxy`)
@@ -47,8 +54,9 @@ and the `pizzasql` database/sql driver expects the same `<dsn>` (a PostgreSQL
 keyword/value string or URL) directly.
 
 Managed tenants are scoped as `org/db`; the API key is the password and the
-user field is ignored by the proxy. TLS is not available on the local proxy hop,
-so use `sslmode=disable` and only connect over loopback or another trusted hop:
+user field is ignored by the proxy. The managed pgproxy can terminate TLS when
+the deployment installs a certificate; use `sslmode=require` then, or
+`sslmode=disable` only over loopback or another trusted hop:
 
 ```sh
 export BROWSER=...   # optional, see the flags below
